@@ -4,7 +4,8 @@
         {
             "label": "upload",
             "type": "shell",
-            "command": "cpwebload upload ${workspaceFolder}/main.py",
+            //"command": "cpwebload upload ${workspaceFolder}/main.py",
+            "command": "python ${workspaceFolder}/../circuitpython_web_uploader/cpwebload.py upload ${workspaceFolder}/main.py",
             "group": {
                 "kind": "build",
                 "isDefault": true

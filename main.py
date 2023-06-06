@@ -1,14 +1,17 @@
 import random
 import vectorio
+import terminalio
 import board
 import displayio
 import time
 import digitalio
 import adafruit_imageload
+from adafruit_display_text import label
 
 DISPLAY_WIDTH = 320
 DISPLAY_HEIGHT = 240
 
+gameOver = False
 allObjects = displayio.Group()
 allSprites = []
 
@@ -33,12 +36,19 @@ class Input:
             
     def isPressed(self, button):
         return self.buttons[button].value == False
+    
+    def anyKeyPressed(self):
+        for button in self.buttons:
+            if button.value == False:
+                return True
+        return False
 
 class Sprite:
     moveRoutine = None
     collisionRoutine = None
     frame = 0
     velocity = [0, 0]
+    isDead = False
     
     def __init__(self, spriteSheet, spritePalette, spriteIndex, position):
         global allObjects, allSprites
@@ -49,6 +59,7 @@ class Sprite:
         self.sprite.y = position[1]
         self.pos = position
         self.velocity = [0, 0]
+        self.type = spriteIndex
         allObjects.append(self.sprite)
         allSprites.append(self)
         
@@ -67,6 +78,9 @@ class Sprite:
     def assignCollisionRoutine(self, collisionRoutine):
         self.collisionRoutine = collisionRoutine
         
+    def kill(self):
+        self.isDead = True
+        
     def update(self):
         self.frame += 1
         self.move(*self.velocity)
@@ -84,13 +98,27 @@ def checkOverlap(sprite1, sprite2):
 def checkCollisions():
     for sprite in allSprites:
         for collisionSprite in allSprites:
-            if sprite.sprite != collisionSprite.sprite and checkOverlap(sprite, collisionSprite):
+            if sprite != collisionSprite and checkOverlap(sprite, collisionSprite):
                 if sprite.collisionRoutine:
                     sprite.collisionRoutine(sprite, collisionSprite)
                     
 def updateSprites():
+    checkCollisions()
     for sprite in allSprites:
         sprite.update()
+        removeIfDead(sprite)
+        
+def removeIfDead(sprite):
+    if sprite.isDead:
+        allObjects.remove(sprite)
+        allSprites.remove(sprite)
+    
+def deleteAll():
+    global allObjects, allSprites
+    for object in allObjects:
+        allSprites.remove(object)
+    for sprite in allSprites:
+        allObjects.remove(sprite)
 
 def createProjectile(position, index, velocity):
     global spriteSheet, spritePalette, allObjects, allSprites
@@ -100,13 +128,23 @@ def createProjectile(position, index, velocity):
     return projectile
 
 def enemyCollisionRoutine(sprite, collisionSprite):
-    if collisionSprite.sprite[0] == Object.PLAYER_PROJECTILE:
-        allObjects.remove(sprite.sprite)
-        allSprites.remove(sprite)
-        allObjects.remove(collisionSprite.sprite)
-        allSprites.remove(collisionSprite)
+    if collisionSprite.type == Object.PLAYER_PROJECTILE:
+        sprite.kill()
+        collisionSprite.kill()
         return True
     return False
+
+def playerCollisionRoutine(sprite, collisionSprite):
+    global gameOver
+    if collisionSprite.type == Object.ENEMY:
+        sprite.kill()
+        gameOver = True
+        return True
+    elif collisionSprite.type == Object.ENEMY_PROJECTILE:
+        sprite.kill()
+        collisionSprite.kill()
+        gameOver = True
+        return True
 
 def enemyMoveRoutine(sprite):
     if random.randint(0, 100) == 0:
@@ -132,35 +170,53 @@ def newEnemy():
     enemy.assignCollisionRoutine(enemyCollisionRoutine)
     return enemy
     
+buttonPad = Input([board.BTN_A, board.BTN_B, board.BTN_C])
+
 def main():
-    global spriteSheet, spritePalette
-    input = Input([board.BTN_A, board.BTN_B, board.BTN_C])
+    global spriteSheet, spritePalette, gameOver
     board.DISPLAY.root_group = allObjects
     spriteSheet, spritePalette = adafruit_imageload.load("/main_sprites.bmp", bitmap=displayio.Bitmap, palette=displayio.Palette)
-    player = Sprite(spriteSheet, spritePalette, 0, [DISPLAY_WIDTH // 2, 200])
-    enemies = []
-    enemyMax = 3
-    firing = False
-    lastShot = time.monotonic()
     while True:
-        if len(enemies) < enemyMax and random.randint(0, 100) == 0:
-            enemies.append(newEnemy())
-        if input.isPressed(Input.LEFT):
-            player.velocity[0] = -2
-        elif input.isPressed(Input.RIGHT):
-            player.velocity[0] = 2
-        else:
-            player.velocity[0] = 0
-        if input.isPressed(Input.CENTER):
-            if firing == False:
-                firing = True
-                createProjectile([player.sprite.x, player.sprite.y - 25], Object.PLAYER_PROJECTILE, [0, -5])
-        else:
-            firing = False
-                
+        player = Sprite(spriteSheet, spritePalette, 0, [DISPLAY_WIDTH // 2, 200])
+        player.assignCollisionRoutine(playerCollisionRoutine)
+        enemies = []
+        enemyMax = 3
+        firing = False
+        while not gameOver:
+            if len(enemies) < enemyMax and random.randint(0, 100) == 0:
+                enemies.append(newEnemy())
+            if buttonPad.isPressed(Input.LEFT):
+                player.velocity[0] = -2
+            elif buttonPad.isPressed(Input.RIGHT):
+                player.velocity[0] = 2
+            else:
+                player.velocity[0] = 0
+            if buttonPad.isPressed(Input.CENTER):
+                if firing == False:
+                    firing = True
+                    createProjectile([player.sprite.x, player.sprite.y - 25], Object.PLAYER_PROJECTILE, [0, -5])
+            else:
+                firing = False
+                    
+            for enemy in enemies:
+                if enemy.isDead:
+                    enemies.remove(enemy)
 
-        updateSprites()
+            updateSprites()
+            time.sleep(0.01)
+        gameOverScreen()
+        
+
+def gameOverScreen():
+    global gameOver
+    gameOverText = label.Label(terminalio.FONT, text="GAME OVER", color=0xFFFFFF)
+    gameOverText.x = 100
+    gameOverText.y = 100
+    allObjects.append(gameOverText)
+    while not buttonPad.anyKeyPressed():
         time.sleep(0.01)
+    gameOver = False
+    deleteAll()
 
 if __name__ == "__main__":
     main()

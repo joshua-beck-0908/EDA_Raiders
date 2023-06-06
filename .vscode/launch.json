@@ -5,15 +5,6 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Regenerate Mazes",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/genmazes.py",
-            "console": "integratedTerminal",
-            "justMyCode": true
-        },        
-
-        {
             "preLaunchTask": "upload",
             "name": "Upload",
             "type": "python",
