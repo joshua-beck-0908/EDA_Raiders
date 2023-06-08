@@ -1,4 +1,5 @@
 import random
+
 import vectorio
 import terminalio
 import board
@@ -9,8 +10,10 @@ import adafruit_imageload
 from adafruit_display_text import label
 from theme import theme_data as backgroundMusic
 import pwmio
+import math
 
 DISPLAY_WIDTH = 320
+GAME_EDGE = 290
 DISPLAY_HEIGHT = 240
 
 gameOver = False
@@ -30,6 +33,7 @@ class MusicPlayer:
         self.pwmPin = pwmio.PWMOut(pwmPin, duty_cycle=0, frequency=440, variable_frequency=True)
         self.setVolume(volume)
         self.volume = volume
+        self.noteNumber = 0
         
     def play(self):
         self.playing = True
@@ -38,6 +42,7 @@ class MusicPlayer:
         
     def stop(self):
         self.playing = False
+        self.setVolume(-1)
         
     def playNextNote(self):
         if len(self.data) == 0:
@@ -49,18 +54,25 @@ class MusicPlayer:
             else:
                 self.playing = False
                 return
-        self.noteNumber += 1
-        self.noteTime = self.data[self.noteNumber][1]
+        self.noteTime = self.data[self.noteNumber][1] / 1000
         self.setFrequency(self.data[self.noteNumber][0])
         self.noteStartTime = time.monotonic()
+        self.noteNumber += 1
         
         
     def setVolume(self, volume):
-        self.pwmPin.duty_cycle = int(volume * 65535)
-        self.volume = volume
+        if volume < 0:
+            self.pwmPin.duty_cycle = 0
+        else:
+            self.pwmPin.duty_cycle = int(math.pow(2, volume))
+            self.volume = volume
 
     def setFrequency(self, frequency):
-        self.pwmPin.frequency = frequency
+        if frequency > 0:
+            self.pwmPin.frequency = frequency
+            self.setVolume(self.volume)
+        else:
+            self.setVolume(-1)
         
     def update(self):
         if self.playing:
@@ -77,6 +89,29 @@ class Object:
     CHIP_PART = 5
     PLAYER_PROJECTILE = 6
     
+class UIDisplay:
+    score = 0
+    lives = 3
+    quota = [0, 0, 0]
+    objects = displayio.Group()
+    palette = displayio.Palette(2)
+    palette[0] = 0xFF0000
+    palette[1] = 0x000000
+    
+    def __init__(self):
+        self.reset()
+        
+    def reset(self):
+        global allObjects
+        self.score = 0
+        self.lives = 3
+        self.quota = [0, 0, 0]
+        allObjects.append(self.objects)
+        self.divider = vectorio.Rectangle(pixel_shader=self.palette, x=GAME_EDGE, y=0, width=1, height=240)
+        self.objects.append(self.divider)
+        self.scoreLabel = label.Label(terminalio.FONT, text="Score: " + str(self.score), color=0xFFFFFF, x=10, y=10)
+        self.objects.append(self.scoreLabel)
+
 class Input:
     buttons = []
     LEFT = 0
@@ -119,10 +154,10 @@ class Sprite:
     def move(self, xmove, ymove):
         self.sprite.x += xmove
         self.sprite.y += ymove
-        if self.sprite.x > DISPLAY_WIDTH:
+        if self.sprite.x > GAME_EDGE - self.size[0]:
             self.sprite.x = 0
         elif self.sprite.x < 0:
-            self.sprite.x = DISPLAY_WIDTH
+            self.sprite.x = GAME_EDGE - self.size[0]
         self.pos = [self.sprite.x, self.sprite.y]
             
     def assignMoveRoutine(self, moveRoutine):
@@ -206,9 +241,9 @@ def enemyMoveRoutine(sprite):
         return
     if sprite.velocity[0] == 0:
         sprite.velocity[0] = 1
-    elif sprite.sprite.x > DISPLAY_WIDTH - sprite.sprite.width:
+    elif sprite.sprite.x > GAME_EDGE - sprite.size[0] - 10:
         sprite.velocity[0] = -1
-    elif sprite.sprite.x < sprite.sprite.width:
+    elif sprite.sprite.x < sprite.size[0]:
         sprite.velocity[0] = 1
         
 def projectileMoveRoutine(sprite):
@@ -218,24 +253,26 @@ def projectileMoveRoutine(sprite):
 
 def newEnemy():
     global spriteSheet, spritePalette
-    enemy = Sprite(spriteSheet, spritePalette, 1, [random.randint(0, DISPLAY_WIDTH), 0])
+    enemy = Sprite(spriteSheet, spritePalette, 1, [random.randint(0, GAME_EDGE), 0])
     enemy.assignMoveRoutine(enemyMoveRoutine)
     enemy.assignCollisionRoutine(enemyCollisionRoutine)
     return enemy
     
 buttonPad = Input([board.BTN_A, board.BTN_B, board.BTN_C])
-gameMusic = MusicPlayer(backgroundMusic, board.SPEAKER, loop=True, volume=0.4)
+gameMusic = MusicPlayer(backgroundMusic, board.SPEAKER, loop=True, volume=4)
+gameUi = UIDisplay()
 
 def main():
     global spriteSheet, spritePalette, gameOver
     board.DISPLAY.root_group = allObjects
     spriteSheet, spritePalette = adafruit_imageload.load("/main_sprites.bmp", bitmap=displayio.Bitmap, palette=displayio.Palette)
     while True:
-        player = Sprite(spriteSheet, spritePalette, 0, [DISPLAY_WIDTH // 2, 200])
+        player = Sprite(spriteSheet, spritePalette, 0, [GAME_EDGE // 2, 200])
         player.assignCollisionRoutine(playerCollisionRoutine)
         enemies = []
         enemyMax = 3
         firing = False
+        gameUi.reset()
         gameMusic.play()
         while not gameOver:
             if len(enemies) < enemyMax and random.randint(0, 100) == 0:
