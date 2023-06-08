@@ -7,6 +7,8 @@ import time
 import digitalio
 import adafruit_imageload
 from adafruit_display_text import label
+from theme import theme_data as backgroundMusic
+import pwmio
 
 DISPLAY_WIDTH = 320
 DISPLAY_HEIGHT = 240
@@ -14,6 +16,57 @@ DISPLAY_HEIGHT = 240
 gameOver = False
 allObjects = displayio.Group()
 allSprites = []
+
+class MusicPlayer:
+    data = []
+    noteNumber = 0
+    noteTime = 0
+    loop = False
+    playing = False
+
+    def __init__(self, data, pwmPin, loop=False, volume=0.3):
+        self.data = data
+        self.loop = loop
+        self.pwmPin = pwmio.PWMOut(pwmPin, duty_cycle=0, frequency=440, variable_frequency=True)
+        self.setVolume(volume)
+        self.volume = volume
+        
+    def play(self):
+        self.playing = True
+        self.noteNumber = 0
+        self.playNextNote()
+        
+    def stop(self):
+        self.playing = False
+        
+    def playNextNote(self):
+        if len(self.data) == 0:
+            self.playing = False
+            return
+        if self.noteNumber >= len(self.data):
+            if self.loop:
+                self.noteNumber = 0
+            else:
+                self.playing = False
+                return
+        self.noteNumber += 1
+        self.noteTime = self.data[self.noteNumber][1]
+        self.setFrequency(self.data[self.noteNumber][0])
+        self.noteStartTime = time.monotonic()
+        
+        
+    def setVolume(self, volume):
+        self.pwmPin.duty_cycle = int(volume * 65535)
+        self.volume = volume
+
+    def setFrequency(self, frequency):
+        self.pwmPin.frequency = frequency
+        
+    def update(self):
+        if self.playing:
+            if time.monotonic() - self.noteStartTime > self.noteTime:
+                self.playNextNote()
+        
 
 class Object:
     PLAYER = 0
@@ -106,19 +159,19 @@ def updateSprites():
     checkCollisions()
     for sprite in allSprites:
         sprite.update()
+    for sprite in allSprites:
         removeIfDead(sprite)
         
 def removeIfDead(sprite):
     if sprite.isDead:
-        allObjects.remove(sprite)
+        allObjects.remove(sprite.sprite)
         allSprites.remove(sprite)
     
 def deleteAll():
     global allObjects, allSprites
-    for object in allObjects:
-        allSprites.remove(object)
-    for sprite in allSprites:
-        allObjects.remove(sprite)
+    for n in range(len(allObjects)):
+        del allObjects[0]
+    allSprites.clear()
 
 def createProjectile(position, index, velocity):
     global spriteSheet, spritePalette, allObjects, allSprites
@@ -171,6 +224,7 @@ def newEnemy():
     return enemy
     
 buttonPad = Input([board.BTN_A, board.BTN_B, board.BTN_C])
+gameMusic = MusicPlayer(backgroundMusic, board.SPEAKER, loop=True, volume=0.4)
 
 def main():
     global spriteSheet, spritePalette, gameOver
@@ -182,6 +236,7 @@ def main():
         enemies = []
         enemyMax = 3
         firing = False
+        gameMusic.play()
         while not gameOver:
             if len(enemies) < enemyMax and random.randint(0, 100) == 0:
                 enemies.append(newEnemy())
@@ -203,12 +258,14 @@ def main():
                     enemies.remove(enemy)
 
             updateSprites()
+            gameMusic.update()
             time.sleep(0.01)
         gameOverScreen()
         
 
 def gameOverScreen():
     global gameOver
+    gameMusic.stop()
     gameOverText = label.Label(terminalio.FONT, text="GAME OVER", color=0xFFFFFF)
     gameOverText.x = 100
     gameOverText.y = 100
