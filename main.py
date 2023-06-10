@@ -26,6 +26,7 @@ class MusicPlayer:
     noteTime = 0
     loop = False
     playing = False
+    paused = False
 
     def __init__(self, data, pwmPin, loop=False, volume=0.3):
         self.data = data
@@ -44,6 +45,14 @@ class MusicPlayer:
         self.playing = False
         self.setVolume(-1)
         
+    def pause(self):
+        self.paused = True
+        self.pwmPin.duty_cycle = 0
+        
+    def resume(self):
+        self.paused = False
+        self.playNextNote()
+        
     def playNextNote(self):
         if len(self.data) == 0:
             self.playing = False
@@ -55,7 +64,8 @@ class MusicPlayer:
                 self.playing = False
                 return
         self.noteTime = self.data[self.noteNumber][1] / 1000
-        self.setFrequency(self.data[self.noteNumber][0])
+        self.currentFreq = self.data[self.noteNumber][0]
+        self.setFrequency(self.currentFreq)
         self.noteStartTime = time.monotonic()
         self.noteNumber += 1
         
@@ -75,7 +85,7 @@ class MusicPlayer:
             self.setVolume(-1)
         
     def update(self):
-        if self.playing:
+        if self.playing and not self.paused:
             if time.monotonic() - self.noteStartTime > self.noteTime:
                 self.playNextNote()
         
@@ -148,7 +158,7 @@ class Sprite:
         self.pos = position
         self.velocity = [0, 0]
         self.type = spriteIndex
-        allObjects.append(self.sprite)
+        allObjects.insert(0, self.sprite)
         allSprites.append(self)
         
     def move(self, xmove, ymove):
@@ -262,6 +272,26 @@ buttonPad = Input([board.BTN_A, board.BTN_B, board.BTN_C])
 gameMusic = MusicPlayer(backgroundMusic, board.SPEAKER, loop=True, volume=4)
 gameUi = UIDisplay()
 
+def addCentreText(text):
+    global allObjects
+    text = label.Label(terminalio.FONT, text=text, color=0xFFFFFF)
+    text.x = DISPLAY_WIDTH // 2 - text.width // 2
+    text.y = DISPLAY_HEIGHT // 2 - text.height // 2
+    allObjects.append(text)
+    return text
+
+def pauseGame():
+    gameMusic.pause()
+    pauseText = addCentreText("PAUSED")
+    while buttonPad.anyKeyPressed():
+        time.sleep(0.1)
+    while True:
+        if buttonPad.anyKeyPressed():
+            break
+        time.sleep(0.1)
+    gameMusic.resume()
+    allObjects.remove(pauseText)
+
 def main():
     global spriteSheet, spritePalette, gameOver
     board.DISPLAY.root_group = allObjects
@@ -272,12 +302,14 @@ def main():
         enemies = []
         enemyMax = 3
         firing = False
-        gameUi.reset()
         gameMusic.play()
         while not gameOver:
             if len(enemies) < enemyMax and random.randint(0, 100) == 0:
                 enemies.append(newEnemy())
             if buttonPad.isPressed(Input.LEFT):
+                if buttonPad.isPressed(Input.RIGHT):
+                    player.velocity[0] = 0
+                    pauseGame()
                 player.velocity[0] = -2
             elif buttonPad.isPressed(Input.RIGHT):
                 player.velocity[0] = 2
@@ -303,14 +335,12 @@ def main():
 def gameOverScreen():
     global gameOver
     gameMusic.stop()
-    gameOverText = label.Label(terminalio.FONT, text="GAME OVER", color=0xFFFFFF)
-    gameOverText.x = 100
-    gameOverText.y = 100
-    allObjects.append(gameOverText)
+    addCentreText("GAME OVER")
     while not buttonPad.anyKeyPressed():
         time.sleep(0.01)
     gameOver = False
     deleteAll()
+    gameUi.reset()
 
 if __name__ == "__main__":
     main()
