@@ -1,4 +1,5 @@
 import random
+from re import L
 
 import vectorio
 import terminalio
@@ -15,6 +16,7 @@ import math
 DISPLAY_WIDTH = 320
 GAME_EDGE = 290
 DISPLAY_HEIGHT = 240
+FPS = 30
 
 gameOver = False
 allObjects = displayio.Group()
@@ -107,21 +109,66 @@ class UIDisplay:
     palette = displayio.Palette(2)
     palette[0] = 0xFF0000
     palette[1] = 0x000000
+    level = 1
     
     def __init__(self):
         self.reset()
         
     def reset(self):
-        global allObjects
+        global allObjects, spriteSheet, spritePalette
         self.score = 0
         self.lives = 3
         self.quota = [0, 0, 0]
         allObjects.append(self.objects)
+        for i in range(len(self.objects)):
+            del self.objects[0]
         self.divider = vectorio.Rectangle(pixel_shader=self.palette, x=GAME_EDGE, y=0, width=1, height=240)
         self.objects.append(self.divider)
         self.scoreLabel = label.Label(terminalio.FONT, text="Score: " + str(self.score), color=0xFFFFFF, x=10, y=10)
         self.objects.append(self.scoreLabel)
+        self.livesSprite = Sprite(spriteSheet, spritePalette, Object.PLAYER, [GAME_EDGE + 5, 10], uiPart=True)
+        self.livesLabel = label.Label(terminalio.FONT, text=f'x {self.lives}', color=0xFF0000, x=GAME_EDGE + 5, y=40)
+        self.objects.append(self.livesLabel)
+        self.quoteSprite = []
+        self.quoteLabel = []
+        for i in range(3):
+            self.quoteSprite.append(Sprite(spriteSheet, spritePalette, Object.PASSIVE_PART + i, [GAME_EDGE + 5, 50 + i * 30], uiPart=True))
+            self.quoteLabel.append(label.Label(terminalio.FONT, text=f'x{self.quota[i]:03}', color=0xFF0000, x=GAME_EDGE + 5, y=75 + i * 30))
+            self.objects.append(self.quoteLabel[i])
+            
+        
+    def loseLife(self):
+        global gameOver
+        self.lives -= 1
+        if self.lives <= 0:
+            gameOver = True
+            
+    def setQuota(self, level):
+        pass
+    def startLevel(self):
+        self.setQuota(self.level)        
 
+    def update(self):
+        self.scoreLabel.text = "Score: " + str(self.score)
+        self.livesLabel.text = f'x {self.lives}'
+
+class Level:
+    data = {
+        1: {'name': 'Basics',           'quota': [10, 0, 0],    'enemyMax': 3},
+        2: {'name': 'Balanced Boards',  'quota': [10, 5, 2],    'enemyMax': 4},
+        3: {'name': 'Chip Shortage',    'quota': [0, 0, 5],     'enemyMax': 5}
+    }
+    current = 0
+
+
+    def set(self, level):
+        self.current = level
+        levelData = self.data[level]
+        self.name = levelData['name']
+        self.quota = levelData['quota']
+        self.enemyMax = levelData['enemyMax']
+        
+        
 class Input:
     buttons = []
     LEFT = 0
@@ -148,7 +195,7 @@ class Sprite:
     velocity = [0, 0]
     isDead = False
     
-    def __init__(self, spriteSheet, spritePalette, spriteIndex, position):
+    def __init__(self, spriteSheet, spritePalette, spriteIndex, position, uiPart=False):
         global allObjects, allSprites
         self.sprite = displayio.TileGrid(spriteSheet, pixel_shader=spritePalette, width=1, height=1, tile_width=20, tile_height=20)
         self.size = [20, 20]
@@ -158,10 +205,13 @@ class Sprite:
         self.pos = position
         self.velocity = [0, 0]
         self.type = spriteIndex
+        self.uiPart = uiPart
         allObjects.insert(0, self.sprite)
         allSprites.append(self)
         
     def move(self, xmove, ymove):
+        if self.uiPart:
+            return
         self.sprite.x += xmove
         self.sprite.y += ymove
         if self.sprite.x > GAME_EDGE - self.size[0]:
@@ -195,6 +245,8 @@ def checkOverlap(sprite1, sprite2):
     
 def checkCollisions():
     for sprite in allSprites:
+        if sprite.uiPart:
+            continue
         for collisionSprite in allSprites:
             if sprite != collisionSprite and checkOverlap(sprite, collisionSprite):
                 if sprite.collisionRoutine:
@@ -229,20 +281,44 @@ def enemyCollisionRoutine(sprite, collisionSprite):
     if collisionSprite.type == Object.PLAYER_PROJECTILE:
         sprite.kill()
         collisionSprite.kill()
+        projRoll = random.randint(0, 100)
+        if projRoll < 60:
+            pass
+        elif projRoll < 80:
+            createProjectile([sprite.sprite.x, sprite.sprite.y + 20], Object.PASSIVE_PART, [0, 2])
+        elif projRoll < 90:
+            createProjectile([sprite.sprite.x, sprite.sprite.y + 20], Object.SOT_PART, [0, 2])
+        elif projRoll < 95:
+            createProjectile([sprite.sprite.x, sprite.sprite.y + 20], Object.CHIP_PART, [0, 2])
         return True
     return False
 
 def playerCollisionRoutine(sprite, collisionSprite):
     global gameOver
     if collisionSprite.type == Object.ENEMY:
-        sprite.kill()
-        gameOver = True
+        gameUi.loseLife()
         return True
     elif collisionSprite.type == Object.ENEMY_PROJECTILE:
-        sprite.kill()
+        gameUi.loseLife()
         collisionSprite.kill()
-        gameOver = True
         return True
+    elif collisionSprite.type == Object.PASSIVE_PART:
+        collisionSprite.kill()
+        gameUi.score += 5
+        gameUi.quota[0] -= 1
+        return True
+    elif collisionSprite.type == Object.SOT_PART:
+        collisionSprite.kill()
+        gameUi.score += 10
+        gameUi.quota[1] -= 1
+        return True
+    elif collisionSprite.type == Object.CHIP_PART:
+        collisionSprite.kill()
+        gameUi.score += 25
+        gameUi.quota[2] -= 1
+        return True
+    else:
+        return False
 
 def enemyMoveRoutine(sprite):
     if random.randint(0, 100) == 0:
@@ -268,9 +344,11 @@ def newEnemy():
     enemy.assignCollisionRoutine(enemyCollisionRoutine)
     return enemy
     
+spriteSheet, spritePalette = adafruit_imageload.load("/main_sprites.bmp", bitmap=displayio.Bitmap, palette=displayio.Palette)
 buttonPad = Input([board.BTN_A, board.BTN_B, board.BTN_C])
 gameMusic = MusicPlayer(backgroundMusic, board.SPEAKER, loop=True, volume=4)
 gameUi = UIDisplay()
+gameLevel = Level()
 
 def addCentreText(text):
     global allObjects
@@ -295,14 +373,17 @@ def pauseGame():
 def main():
     global spriteSheet, spritePalette, gameOver
     board.DISPLAY.root_group = allObjects
-    spriteSheet, spritePalette = adafruit_imageload.load("/main_sprites.bmp", bitmap=displayio.Bitmap, palette=displayio.Palette)
+    lastFrame = time.monotonic()
     while True:
         player = Sprite(spriteSheet, spritePalette, 0, [GAME_EDGE // 2, 200])
         player.assignCollisionRoutine(playerCollisionRoutine)
+        gameLevel.set(1)
         enemies = []
         enemyMax = 3
         firing = False
+        pressToStart()
         gameMusic.play()
+        gameUi.startLevel()
         while not gameOver:
             if len(enemies) < enemyMax and random.randint(0, 100) == 0:
                 enemies.append(newEnemy())
@@ -328,10 +409,21 @@ def main():
 
             updateSprites()
             gameMusic.update()
-            time.sleep(0.01)
+            gameUi.update()
+            frameDelay = 1 / FPS - (time.monotonic() - lastFrame)
+            if frameDelay > 0:
+                time.sleep(frameDelay)
         gameOverScreen()
         
 
+def pressToStart():
+    gameMusic.pause()
+    startText = addCentreText("PRESS ANY BUTTON TO START")
+    while not buttonPad.anyKeyPressed():
+        time.sleep(0.01)
+    allObjects.remove(startText)
+    gameMusic.resume()
+    
 def gameOverScreen():
     global gameOver
     gameMusic.stop()
